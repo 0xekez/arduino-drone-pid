@@ -78,15 +78,20 @@ char buf[60];
 unsigned long lastPress = 0;
 
 // ---------------- MPU Variables ---------------------------------------
+/*
+ * Offset values are calculated with the IMU_zero exaple sketch
+ */
 // Raw values from gyro (deg/sec) in order: [x, y, z]
 int gyro_raw[3] = {0,0,0};
 // Average gyro offsets on each axis in order: [x, y, z]
-long gyro_offset[3] = {0,0,0};
+long gyro_offset[3] = {113,45,33};
 // Calculated angles from gyro in order: [x, y, z]
 float gyro_angle[3] = {0,0,0};
 
 //Raw values from accelerometer (m/sec^2) in order: [x, y, z]
 int acc_raw[3] = {0,0,0};
+//acc offsets in order: [x,y,z]
+long acc_offsets[3] = {-3061,-617,607};
 // Calculated angles from accelerometer in order: [x, y, z]
 float acc_angle[3] = {0,0,0};
 
@@ -182,8 +187,6 @@ void setup() {
 
   setupMpu6050Registers();
 
-  calibrateMpu6050();
-
   BLEsetup();
 
   // Turn off MPU once setup is complete
@@ -254,8 +257,8 @@ void calculateAngles()
 
     if (initialized) {
         // Correct the drift of the gyro with the accelerometer
-        gyro_angle[X] = gyro_angle[X] * 0.9996 + acc_angle[X] * 0.0004;
-        gyro_angle[Y] = gyro_angle[Y] * 0.9996 + acc_angle[Y] * 0.0004;
+        gyro_angle[X] = gyro_angle[X] * 0.99 + acc_angle[X] * 0.01;
+        gyro_angle[Y] = gyro_angle[Y] * 0.99 + acc_angle[Y] * 0.01;
     } else {
         // At very first start, init gyro angles with accelerometer angles
         resetGyroAngles();
@@ -370,38 +373,6 @@ void setupMpu6050Registers() {
     Wire.write(0x1A);                    // Request the CONFIG register
     Wire.write(0x03);                    // Set Digital Low Pass Filter about ~43Hz
     Wire.endTransmission();              // End the transmission
-}
-
-/**
- * Calibrate MPU6050: take 2000 samples to calculate average offsets.
- * During this step, the quadcopter needs to be static and on a horizontal surface.
- *
- * This function also sends low throttle signal to each ESC to init and prevent them beeping annoyingly.
- *
- * This function might take ~2sec for 2000 samples.
- *
- * @return void
- */
-void calibrateMpu6050()
-{
-    int max_samples = 0;
-    
-
-    for (int i = 0; i < max_samples; i++) {
-        readSensor();
-
-        gyro_offset[X] += gyro_raw[X];
-        gyro_offset[Y] += gyro_raw[Y];
-        gyro_offset[Z] += gyro_raw[Z];
-
-        // Just wait a bit before next loop
-        delay(3);
-    }
-
-    // Calculate average offsets
-    gyro_offset[X] /= max_samples;
-    gyro_offset[Y] /= max_samples;
-    gyro_offset[Z] /= max_samples;
 }
 
 // A small helper for bluetooth error catching
