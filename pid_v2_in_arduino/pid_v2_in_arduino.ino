@@ -21,7 +21,7 @@
 
 // ---------------- Constants ---------------------------------------
 # define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
-# define FREQ        250   // Sampling frequency
+# define FREQ        130   // Sampling frequency
 # define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
 
 // Index locations for data and instructions
@@ -46,8 +46,13 @@
 /*
  * Received flight instructions in order:
  * [Yaw (cardinal direction), Pitch (x), Roll (y), Throttle]
+ * you might wonder.. why does the pitch default to 4?
+ * the answer: not sure, no matter how I set up the gryo offsets flat is always 
+ * apparently 4 degrees. I've tried subtracting four degrees from each measure,
+ * calculating the offsets differently, everything except calculating acceletometer
+ * offsets which I should do but don't want to.
  */
-float instruction[4];
+float instruction[4] = {0,4,0,0};
 /*
  * Time information, stored in 'volatile' to signal to compilier that this
  * changes unpredictably and shouldn't be optimized.
@@ -109,14 +114,22 @@ bool started = false;
 // Pins MOSFET sources are attached to on Arduino for each motor
 int motor_lf {11},
     motor_lb {10},
-    motor_rf {6},
-    motor_rb {9};
+    motor_rf {9},
+    motor_rb {6};
 
 // Throttle values for each motor
 int motor_lf_throttle {0},
     motor_lb_throttle {0},
     motor_rf_throttle {0},
     motor_rb_throttle {0};
+
+// possible that each motor is of slightly different powers:
+// these values are added from each motors throttles 
+// at each loop through the PID
+int motor_lf_mod {0},//{40},
+    motor_rf_mod {0},
+    motor_lb_mod {0},//{17},
+    motor_rb_mod {0};
 
 // ---------------- PID Variables ---------------------------------------
 // Measured errors compared to target positions in order: [yaw, pitch, roll]
@@ -126,6 +139,14 @@ float error_sum[3] = {0,0,0};
 // Previous errors used for derivative component of PID in order:
 // [yaw, pirch, roll]
 float previous_error[3] = {0,0,0};
+float Kp[3]        = {0, 6.7, 7.2};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0,5.8,6.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
+
+// Violent Oscilations
+//float Kp[3]        = {4.0*(250/1000), 1.8*(250/1000), 1.3*(250/1000)};    // P coefficients in that order : Yaw, Pitch, Roll
+//float Ki[3]        = {0.02*(250/1000), 0.04*(250/1000), 0.04*(250/1000)}; // I coefficients in that order : Yaw, Pitch, Roll
+//float Kd[3]        = {0, 18*(250/1000), 18*(250/1000)};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -138,6 +159,10 @@ float previous_error[3] = {0,0,0};
 int status = STOPPED;
 // ---------------------------------------------------------------------------
 
+// for calculating running frequency of code
+//float i {0};
+//float start_seconds {0};
+
 // Function Prototypes
 void pidController();
 void applyMotorSpeeds();
@@ -149,7 +174,6 @@ void setup() {
   stopMotors();
   Wire.begin();
   Serial.begin(9600);
-  Serial.println("dogs");
   TWBR = 12; // 24 for 400kHz clock, Feather is 200kHz
 
   // Turn on LED for setup
@@ -164,9 +188,13 @@ void setup() {
 
   // Turn off MPU once setup is complete
   digitalWrite(13, LOW);
+  //start_seconds = millis()/1000;
 }
 
 void loop() {
+  // code for calculating the running frequency of the program = 150 hz
+//  i++;
+//  Serial.println(i/(millis()/1000-start_seconds));
   // 1. Read raw values from MPU6050
   readSensor();
 
@@ -220,6 +248,7 @@ void readSensor() {
  */
 void calculateAngles()
 {
+    
     calculateGyroAngles();
     calculateAccelerometerAngles();
 
@@ -238,12 +267,11 @@ void calculateAngles()
     measures[ROLL]  = measures[ROLL]  * 0.9 + gyro_angle[X] * 0.1;
     measures[PITCH] = measures[PITCH] * 0.9 + gyro_angle[Y] * 0.1;
     measures[YAW]   = -gyro_raw[Z] / SSF_GYRO; // Store the angular motion for this axis
-//    Serial.print(measures[ROLL]);
-//    Serial.print(" ");
-//    Serial.print(measures[PITCH]);
-//    Serial.print(" ");
-//    Serial.print(measures[YAW]);
-//    Serial.println(" -------- ");
+    Serial.print(measures[YAW]);
+    Serial.print("\t");
+    Serial.print(measures[PITCH]);
+    Serial.print("\t");
+    Serial.println(measures[ROLL]);
 }
 
 /**
@@ -298,9 +326,16 @@ void calculateAccelerometerAngles()
  * @return void
  */
 void calculateErrors() {
+    // NOTE: currently, roll measurements are very noisy
+    // consider removing from PID calculations ?
     errors[YAW]   = instruction[YAW]   - measures[YAW];
     errors[PITCH] = instruction[PITCH] - measures[PITCH];
     errors[ROLL]  = instruction[ROLL]  - measures[ROLL];
+//    Serial.print(errors[YAW]);
+//    Serial.print("\t");
+//    Serial.print(errors[PITCH]);
+//    Serial.print("\t");
+//    Serial.println(errors[ROLL]);
 }
 
 /**
@@ -349,7 +384,8 @@ void setupMpu6050Registers() {
  */
 void calibrateMpu6050()
 {
-    int max_samples = 2000;
+    int max_samples = 0;
+    
 
     for (int i = 0; i < max_samples; i++) {
         readSensor();
@@ -357,11 +393,6 @@ void calibrateMpu6050()
         gyro_offset[X] += gyro_raw[X];
         gyro_offset[Y] += gyro_raw[Y];
         gyro_offset[Z] += gyro_raw[Z];
-
-        // Generate low throttle pulse to init ESC and prevent them beeping
-        PORTD |= B11110000;                  // Set pins #4 #5 #6 #7 HIGH
-        delayMicroseconds(1000); // Wait 1000µs
-        PORTD &= B00001111;                  // Then set LOW
 
         // Just wait a bit before next loop
         delay(3);
@@ -427,7 +458,10 @@ void BLEsetup(){
 
     /* Wait for connection */
     while (! ble.isConnected()) {
-        delay(500);
+      digitalWrite(13, LOW);
+        delay(250);
+      digitalWrite(13, HIGH);
+      delay(250);
     }
 
     Serial.println(F("*****************"));
@@ -450,46 +484,52 @@ void readController(){
       if (pressed) {
         if(buttnum == 1){
           // Increase throttle
-          //ble.println("Throttle Up");
-          instruction[THROTTLE] = minMax(instruction[THROTTLE]+10, 25, 250);
+          ble.println(instruction[THROTTLE]);
+          instruction[THROTTLE] = minMax(instruction[THROTTLE]+5, 0, 250);
         }
 
         if(buttnum == 2){
           // Decrease throttle
-          //ble.println("Throttle Down");
-          instruction[THROTTLE] = minMax(instruction[THROTTLE]-10, 25, 250);
+          ble.println(instruction[THROTTLE]);
+          instruction[THROTTLE] = minMax(instruction[THROTTLE]-5, 0, 250);
         }
 
         if(buttnum == 3){
-          //ble.println("Start");
+          ble.println("Start");
           // possibly make these stop and start
           started = true;
         }
 
         if(buttnum == 4){
-          //ble.println("Stop");
+          ble.println("Stop");
           started = false;
         }
 
         if(buttnum == 5){
-          // TODO: changing this seems to stop the motor values from changing with the noise -- bad?
           //ble.println("Forward");
-          instruction[YAW] -= 10;
-          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+//          instruction[YAW] -= 10;
+//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+          Kp[1] += 0.1;
+          ble.println("Kp roll: "+String(Kp[1]));
+         
         }
 
         if(buttnum == 6){
           //ble.println("Backward");
-          instruction[YAW] += 10;
-          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+//          instruction[YAW] += 10;
+//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+          Kp[1] -= 0.1;
+          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         if(buttnum == 7){
-          ble.println("Left");
+          Kp[1] -= 0.02;
+          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         if(buttnum == 8){
-          ble.println("Right");
+          Kp[1] += 0.02;
+          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         lastPress = millis();
@@ -515,9 +555,6 @@ void readController(){
  * @return void
  */
 void pidController() {
-    float Kp[3]        = {4.0, 1.3, 1.3};    // P coefficients in that order : Yaw, Pitch, Roll
-    float Ki[3]        = {0.02, 0.04, 0.04}; // I coefficients in that order : Yaw, Pitch, Roll
-    float Kd[3]        = {0, 18, 18};        // D coefficients in that order : Yaw, Pitch, Roll
     float delta_err[3] = {0, 0, 0};          // Error deltas in that order   : Yaw, Pitch, Roll
     float yaw_pid      = 0;
     float pitch_pid    = 0;
@@ -544,25 +581,23 @@ void pidController() {
       yaw_pid   = (errors[YAW]   * Kp[YAW])   + (error_sum[YAW]   * Ki[YAW])   + (delta_err[YAW]   * Kd[YAW]);
       pitch_pid = (errors[PITCH] * Kp[PITCH]) + (error_sum[PITCH] * Ki[PITCH]) + (delta_err[PITCH] * Kd[PITCH]);
       roll_pid  = (errors[ROLL]  * Kp[ROLL])  + (error_sum[ROLL]  * Ki[ROLL])  + (delta_err[ROLL]  * Kd[ROLL]);
+      Serial.println(yaw_pid);
 
       // Cauculate new target throttle for each motor
       // NOTE: These depend on setup of drone. Verify setup is propper and
       //       consider changing the plus and minuses here if issues happen.
       //       If drone is in propper setup these make sense.
-      motor_lf_throttle = instruction[THROTTLE] + roll_pid + pitch_pid - yaw_pid;
-      motor_rf_throttle = instruction[THROTTLE] - roll_pid + pitch_pid + yaw_pid;
-      motor_lb_throttle = instruction[THROTTLE] + roll_pid - pitch_pid + yaw_pid;
-      motor_rb_throttle = instruction[THROTTLE] - roll_pid - pitch_pid - yaw_pid;
+      motor_lf_throttle = instruction[THROTTLE] + roll_pid + pitch_pid - yaw_pid + motor_lf_mod;
+      motor_rf_throttle = instruction[THROTTLE] - roll_pid + pitch_pid + yaw_pid + motor_rf_mod;
+      // back motors are way more powerful
+      motor_lb_throttle = instruction[THROTTLE] + roll_pid - pitch_pid + yaw_pid + motor_lb_mod;
+      motor_rb_throttle = instruction[THROTTLE] - roll_pid - pitch_pid - yaw_pid + motor_rb_mod;
     }
-//    // Scale values to be within acceptable range for motors
-//    // NOTE: I scale values to a min of 25 despite the min for the motors being
-//    //       0 (turned off). I do that because it seems unreasonable that a
-//    //       motor should turn off entirely during flight. This is only a
-//    //       suspicion though and is worth recondicering during testing
-    motor_lf_throttle = minMax(motor_lf_throttle, 25, 250);
-    motor_rf_throttle = minMax(motor_rf_throttle, 25, 250);
-    motor_lb_throttle = minMax(motor_lb_throttle, 25, 250);
-    motor_rb_throttle = minMax(motor_rb_throttle, 25, 250);
+    // Scale values to be within acceptable range for motors
+    motor_lf_throttle = minMax(motor_lf_throttle, 0, 250);
+    motor_rf_throttle = minMax(motor_rf_throttle, 0, 250);
+    motor_lb_throttle = minMax(motor_lb_throttle, 0, 250);
+    motor_rb_throttle = minMax(motor_rb_throttle, 0, 250);
 }
 
 /**
@@ -584,14 +619,13 @@ float minMax(float value, float min_value, float max_value) {
 }
 
 void applyMotorSpeeds(){
-  Serial.print(motor_lf_throttle);
-  Serial.print(" ");
-  Serial.print(motor_rf_throttle);
-  Serial.print(" ");
-  Serial.print(motor_lb_throttle);
-  Serial.print(" ");
-  Serial.print(motor_rb_throttle);
-  Serial.println("--------");
+//  Serial.print(motor_lf_throttle);
+//  Serial.print("\t");
+//  Serial.print(motor_rf_throttle);
+//  Serial.print("\t");
+//  Serial.print(motor_lb_throttle);
+//  Serial.print("\t");
+//  Serial.println(motor_rb_throttle);
   analogWrite(motor_lf, motor_lf_throttle);
   analogWrite(motor_rf, motor_rf_throttle);
   analogWrite(motor_lb, motor_lb_throttle);
