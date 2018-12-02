@@ -144,14 +144,14 @@ float error_sum[3] = {0,0,0};
 // Previous errors used for derivative component of PID in order:
 // [yaw, pirch, roll]
 float previous_error[3] = {0,0,0};
-float Kp[3]        = {0, 6.7, 7.2};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0,5.8,6.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
+//float Kp[3]        = {0, 6.7, 7.2};    // P coefficients in that order : Yaw, Pitch, Roll
+//float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
+//float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // Violent Oscilations
-//float Kp[3]        = {4.0*(250/1000), 1.8*(250/1000), 1.3*(250/1000)};    // P coefficients in that order : Yaw, Pitch, Roll
-//float Ki[3]        = {0.02*(250/1000), 0.04*(250/1000), 0.04*(250/1000)}; // I coefficients in that order : Yaw, Pitch, Roll
-//float Kd[3]        = {0, 18*(250/1000), 18*(250/1000)};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kp[3]        = {1., 0.95, 0.825};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.005, 0.01, 0.01}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 4.5, 4.5};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -270,11 +270,11 @@ void calculateAngles()
     measures[ROLL]  = measures[ROLL]  * 0.9 + gyro_angle[X] * 0.1;
     measures[PITCH] = measures[PITCH] * 0.9 + gyro_angle[Y] * 0.1;
     measures[YAW]   = -gyro_raw[Z] / SSF_GYRO; // Store the angular motion for this axis
-    Serial.print(measures[YAW]);
-    Serial.print("\t");
-    Serial.print(measures[PITCH]);
-    Serial.print("\t");
-    Serial.println(measures[ROLL]);
+//    Serial.print(measures[YAW]);
+//    Serial.print("\t");
+//    Serial.print(measures[PITCH]);
+//    Serial.print("\t");
+//    Serial.println(measures[ROLL]);
 }
 
 /**
@@ -477,30 +477,36 @@ void readController(){
         }
 
         if(buttnum == 5){
-          //ble.println("Forward");
-//          instruction[YAW] -= 10;
-//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kp[1] += 0.1;
-          ble.println("Kp roll: "+String(Kp[1]));
+          ble.println("Forward");
+          instruction[YAW] -= 1;
+          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+//          Kp[1] += 0.1;
+//          ble.println("Kp roll: "+String(Kp[1]));
          
         }
 
         if(buttnum == 6){
-          //ble.println("Backward");
-//          instruction[YAW] += 10;
-//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kp[1] -= 0.1;
-          ble.println("Kp roll: "+String(Kp[1]));
+          ble.println("Backward");
+          instruction[YAW] += 1;
+          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+//          Kp[1] -= 0.1;
+//          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         if(buttnum == 7){
-          Kp[1] -= 0.02;
-          ble.println("Kp roll: "+String(Kp[1]));
+          ble.println("right");
+          instruction[ROLL] += 1;
+          instruction[ROLL] = minMax(instruction[ROLL], -180, 180);
+//          Kp[1] -= 0.02;
+//          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         if(buttnum == 8){
-          Kp[1] += 0.02;
-          ble.println("Kp roll: "+String(Kp[1]));
+          ble.println("left");
+          instruction[ROLL] -= 1;
+          instruction[ROLL] = minMax(instruction[ROLL], -180, 180);
+//          Kp[1] += 0.02;
+//          ble.println("Kp roll: "+String(Kp[1]));
         }
 
         lastPress = millis();
