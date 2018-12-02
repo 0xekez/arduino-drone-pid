@@ -149,8 +149,8 @@ float previous_error[3] = {0,0,0};
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
 float Kp[3]        = {0.5, 1.1, 1.3};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.001, 0.002, 0.002}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 6.6, 6.8};        // D coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.001, 0.002, 0.003}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 6.95, 7.15};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
