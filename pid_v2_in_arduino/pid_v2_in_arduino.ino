@@ -148,10 +148,9 @@ float previous_error[3] = {0,0,0};
 //float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
-// Violent Oscilations
-float Kp[3]        = {1., 0.95, 0.825};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.005, 0.01, 0.01}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 4.5, 4.5};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kp[3]        = {0.5, 1.1, 1.3};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.001, 0.002, 0.002}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 6.6, 6.8};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -262,7 +261,6 @@ void calculateAngles()
     } else {
         // At very first start, init gyro angles with accelerometer angles
         resetGyroAngles();
-
         initialized = true;
     }
 
@@ -558,7 +556,7 @@ void pidController() {
       yaw_pid   = (errors[YAW]   * Kp[YAW])   + (error_sum[YAW]   * Ki[YAW])   + (delta_err[YAW]   * Kd[YAW]);
       pitch_pid = (errors[PITCH] * Kp[PITCH]) + (error_sum[PITCH] * Ki[PITCH]) + (delta_err[PITCH] * Kd[PITCH]);
       roll_pid  = (errors[ROLL]  * Kp[ROLL])  + (error_sum[ROLL]  * Ki[ROLL])  + (delta_err[ROLL]  * Kd[ROLL]);
-      Serial.println(yaw_pid);
+      //Serial.println(yaw_pid);
 
       // Cauculate new target throttle for each motor
       // NOTE: These depend on setup of drone. Verify setup is propper and
