@@ -1,5 +1,5 @@
 #include <string.h>
-#include <Arduino.h>
+//#include <Arduino.h>
 #include <SPI.h>
 #if not defined (_VARIANT_ARDUINO_DUE_X_) && not defined (_VARIANT_ARDUINO_ZERO_)
   #include <SoftwareSerial.h>
@@ -24,18 +24,6 @@
 
 /* Buffer to hold incoming characters */
 uint8_t packetbuffer[READ_BUFSIZE+1];
-
-/**************************************************************************/
-/*!
-    @brief  Casts the four bytes at the specified address to a float
-*/
-/**************************************************************************/
-float parsefloat(uint8_t *buffer) 
-{
-  float f;
-  memcpy(&f, buffer, 4);
-  return f;
-}
 
 /**************************************************************************/
 /*! 

@@ -22,9 +22,6 @@
 #include "MPU6050_6Axis_MotionApps20.h"
 
 // ---------------- Constants ---------------------------------------
-# define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
-# define FREQ        130   // Sampling frequency
-# define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
 #define INTERRUPT_PIN 2
 
 // Index locations for data and instructions
@@ -37,7 +34,7 @@
 # define Y           1     // Y axis
 # define Z           2     // Z axis
 #define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
-#define FREQ        200   // Sampling frequency
+#define FREQ        170   // Sampling frequency
 #define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
 
 // Status of Drone
@@ -56,11 +53,6 @@
  * offsets which I should do but don't want to.
  */
 float instruction[4] = {0,4,0,0};
-/*
- * Time information, stored in 'volatile' to signal to compilier that this
- * changes unpredictably and shouldn't be optimized.
- */
-volatile float elapsed_time, time, previous_time;
 
 // ---------------- BLE variables ---------------------------------------
 String BROADCAST_NAME = "Contains Nuts";
@@ -84,22 +76,12 @@ unsigned long lastPress = 0;
 /*
  * Offset values are calculated with the IMU_zero exaple sketch
  */
-// Raw values from gyro (deg/sec) in order: [x, y, z]
-int gyro_raw[3] = {0,0,0};
 // Average gyro offsets on each axis in order: [x, y, z]
 long gyro_offsets[3] = {113,45,33};
-// Calculated angles from gyro in order: [x, y, z]
-float gyro_angle[3] = {0,0,0};
 
-//Raw values from accelerometer (m/sec^2) in order: [x, y, z]
-int acc_raw[3] = {0,0,0};
 //acc offsets in order: [x,y,z]
 long acc_offsets[3] = {-3061,-617,607};
-// Calculated angles from accelerometer in order: [x, y, z]
-float acc_angle[3] = {0,0,0};
 
-// total 3D acceleration vector (m/sec^2)
-long acc_total_vector;
 MPU6050 mpu;
 
 // MPU control/status vars
@@ -128,8 +110,6 @@ VectorFloat gravity;    // [x, y, z]            gravity vector
  *       MPU sensor.
  */
 float measures[3] = {0,0,0};
-// The MPU temperature
-int mpu_temp;
 // Flag to signify if the system is started
 bool started = false;
 
@@ -137,22 +117,14 @@ bool started = false;
 // Pins MOSFET sources are attached to on Arduino for each motor
 int motor_lf {11},
     motor_lb {10},
-    motor_rf {9},
-    motor_rb {6};
+    motor_rf {6},
+    motor_rb {9};
 
 // Throttle values for each motor
 int motor_lf_throttle {0},
     motor_lb_throttle {0},
     motor_rf_throttle {0},
     motor_rb_throttle {0};
-
-// possible that each motor is of slightly different powers:
-// these values are added from each motors throttles 
-// at each loop through the PID
-int motor_lf_mod {0},//{40},
-    motor_rf_mod {0},
-    motor_lb_mod {0},//{17},
-    motor_rb_mod {0};
 
 // ---------------- PID Variables ---------------------------------------
 // Measured errors compared to target positions in order: [yaw, pitch, roll]
@@ -166,10 +138,14 @@ float previous_error[3] = {0,0,0};
 //float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
-//float Kp[3]        = {0, 0, 0};
-float Kp[3]        = {0, 1.4, 1.4};    // P coefficients in that order : Yaw, Pitch, Roll
+float Kp[3]        = {0, 0, 0};
+//float Kp[3]        = {0, 0.7, 0.7};    // P coefficients in that order : Yaw, Pitch, Roll
 float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 70, 70};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 28, 28};        // D coefficients in that order : Yaw, Pitch, Roll
+
+//float Kp[3]        = {8.5, 4, 4};    // P coefficients in that order : Yaw, Pitch, Roll
+//float Ki[3]        = {0.00, 0.0, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
+//float Kd[3]        = {0, 0, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -183,35 +159,24 @@ int status = STOPPED;
 // ---------------------------------------------------------------------------
 
 // for calculating running frequency of code
-//float i {0};
+float i {0};
 //float start_seconds {0};
-
-// Function Prototypes
-void pidController();
-void applyMotorSpeeds();
-void stopMotors();
-float minMax(float value, float min_value, float max_value);
-void error(const __FlashStringHelper*err);
 
 void setup() {
   stopMotors();
   Wire.begin();
-  Serial.begin(9600);
-  TWBR = 12; // 24 for 400kHz clock, Feather is 200kHz
+  Serial.begin(115200);
 
   // Turn on LED for setup
   pinMode(13, OUTPUT);
   digitalWrite(13, HIGH);
-
-//  setupMpu6050Registers();
+  setupMPUv2();
 
   BLEsetup();
 
   // Turn off MPU once setup is complete
   digitalWrite(13, LOW);
 //  start_seconds = millis()/1000;
-  //initialize the gyro angles with the accel
-  resetGyroAngles();
 }
 
 void loop() {
@@ -220,19 +185,15 @@ void loop() {
     ble.print("MPU error");
     return;
   }
-  // code for calculating the running frequency of the program = 150 hz
+  // code for calculating the running frequency of the program
 //  i++;
 //  Serial.println(i/(millis()/1000-start_seconds));
-  // 1. Read raw values from MPU6050
-  readSensor();
-
-  // 2. Calculate actual angles from raw data
-  calculateAngles();
 
   // 3. Read input from bluetooth controller
-  // NOTE: right now this does nothing. make sure to make button start drone
-  //       this involves the started bool variable
   readController();
+  
+  // 2. Calculate actual angles from raw data
+  calculateAnglesv2();
 
   // 4. Calculate Errors based on new inputs
   calculateErrors();
@@ -273,14 +234,12 @@ void setupMPUv2(){
     mpu.setDMPEnabled(true);
 
     // enable Arduino interrupt detection
-    Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
-    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
-    Serial.println(F(")..."));
+//    Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
+//    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
+//    Serial.println(F(")..."));
     attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
     mpuIntStatus = mpu.getIntStatus();
 
-    // set our DMP Ready flag so the main loop() function knows it's okay to use it
-    Serial.println(F("DMP ready! Waiting for first interrupt..."));
     dmpReady = true;
 
     // get expected DMP packet size for later comparison
@@ -303,16 +262,6 @@ void calculateAnglesv2(){
         // try to get out of the infinite loop 
         fifoCount = mpu.getFIFOCount();
       }  
-      // other program behavior stuff here
-      // .
-      // .
-      // .
-      // if you are really paranoid you can frequently test in between other
-      // stuff to see if mpuInterrupt is true, and if so, "break;" from the
-      // while() loop to immediately process the MPU data
-      // .
-      // .
-      // .
   }
 
   // reset interrupt flag and get INT_STATUS byte
@@ -343,102 +292,17 @@ void calculateAnglesv2(){
       mpu.dmpGetQuaternion(&q, fifoBuffer);
       mpu.dmpGetGravity(&gravity, &q);
       mpu.dmpGetYawPitchRoll(measures, &q, &gravity);
+      measures[YAW] = measures[YAW]*180/M_PI;
+      measures[PITCH] = measures[PITCH]*180/M_PI;
+      measures[ROLL] = measures[ROLL]*180/M_PI;
+      Serial.print(measures[YAW]);
+      Serial.print("\t");
+      Serial.print(measures[PITCH]);
+      Serial.print("\t");
+      Serial.println(measures[ROLL]);
 }
 }
 
-
-/**
- * Request raw values from MPU6050.
- *
- * @return void
- */
-void readSensor() {
-    Wire.beginTransmission(MPU_ADDRESS); // Start communicating with the MPU-6050
-    Wire.write(0x3B);                    // Send the requested starting register
-    Wire.endTransmission();              // End the transmission
-    Wire.requestFrom(MPU_ADDRESS,14);    // Request 14 bytes from the MPU-6050
-
-    // Wait until all the bytes are received
-    while(Wire.available() < 14);
-
-    acc_raw[X]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[X] variable
-    acc_raw[Y]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[Y] variable
-    acc_raw[Z]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[Z] variable
-    mpu_temp = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the temperature variable
-    gyro_raw[X] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[X] variable
-    gyro_raw[Y] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[Y] variable
-    gyro_raw[Z] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[Z] variable
-}
-
-/**
- * Calculate real angles from gyro and accelerometer's values
- */
-void calculateAngles()
-{
-    
-    calculateGyroAngles();
-    calculateAccelerometerAngles();
-
-    // Correct the drift of the gyro with the accelerometer
-    gyro_angle[X] = gyro_angle[X] * 0.99 + acc_angle[X] * 0.01;
-    gyro_angle[Y] = gyro_angle[Y] * 0.99 + acc_angle[Y] * 0.01;
-
-    // To dampen the pitch and roll angles a complementary filter is used
-    measures[ROLL]  = measures[ROLL]  * 0.9 + gyro_angle[X] * 0.1;
-    measures[PITCH] = measures[PITCH] * 0.9 + gyro_angle[Y] * 0.1;
-    measures[YAW]   = -gyro_raw[Z] / SSF_GYRO; // Store the angular motion for this axis
-//    Serial.print(measures[YAW]);
-//    Serial.print("\t");
-//    Serial.print(measures[PITCH]);
-//    Serial.print("\t");
-//    Serial.println(measures[ROLL]);
-}
-
-/**
- * Calculate pitch & roll angles using only the gyro.
- */
-void calculateGyroAngles()
-{
-    // Subtract offsets
-    gyro_raw[X] -= gyro_offsets[X];
-    gyro_raw[Y] -= gyro_offsets[Y];
-    gyro_raw[Z] -= gyro_offsets[Z];
-
-    // Angle calculation using integration
-    gyro_angle[X] += (gyro_raw[X] / (FREQ * SSF_GYRO));
-    gyro_angle[Y] += (-gyro_raw[Y] / (FREQ * SSF_GYRO)); // Change sign to match the accelerometer's one
-
-    // Transfer roll to pitch if IMU has yawed
-    gyro_angle[Y] += gyro_angle[X] * sin(gyro_raw[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-    gyro_angle[X] -= gyro_angle[Y] * sin(gyro_raw[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-}
-
-/**
- * Reset gyro's angles with accelerometer's angles.
- */
-void resetGyroAngles()
-{
-    gyro_angle[X] = acc_angle[X];
-    gyro_angle[Y] = acc_angle[Y];
-}
-
-/**
- * Calculate pitch & roll angles using only the accelerometer.
- */
-void calculateAccelerometerAngles()
-{
-    // Calculate total 3D acceleration vector : √(X² + Y² + Z²)
-    acc_total_vector = sqrt(pow(acc_raw[X], 2) + pow(acc_raw[Y], 2) + pow(acc_raw[Z], 2));
-
-    // To prevent asin to produce a NaN, make sure the input value is within [-1;+1]
-    if (abs(acc_raw[X]) < acc_total_vector) {
-        acc_angle[X] = asin((float)acc_raw[Y] / acc_total_vector) * (180 / PI); // asin gives angle in radian. Convert to degree multiplying by 180/pi
-    }
-
-    if (abs(acc_raw[Y]) < acc_total_vector) {
-        acc_angle[Y] = asin((float)acc_raw[X] / acc_total_vector) * (180 / PI);
-    }
-}
 
 /**
  * Calculate errors of Yaw, Pitch & Roll: this is simply the difference between the measure and the command.
@@ -458,40 +322,6 @@ void calculateErrors() {
 //    Serial.println(errors[ROLL]);
 }
 
-/**
- * Configure gyro and accelerometer precision as following:
- *  - accelerometer: ±8g
- *  - gyro: ±500°/s
- *
- * @see https://www.invensense.com/wp-content/uploads/2015/02/MPU-6000-Register-Map1.pdf
- * @return void
- */
-void setupMpu6050Registers() {
-    // Configure power management
-    Wire.beginTransmission(MPU_ADDRESS); // Start communication with MPU
-    Wire.write(0x6B);                    // Request the PWR_MGMT_1 register
-    Wire.write(0x00);                    // Apply the desired configuration to the register
-    Wire.endTransmission();              // End the transmission
-
-    // Configure the gyro's sensitivity
-    Wire.beginTransmission(MPU_ADDRESS); // Start communication with MPU
-    Wire.write(0x1B);                    // Request the GYRO_CONFIG register
-    Wire.write(0x08);                    // Apply the desired configuration to the register : ±500°/s
-    Wire.endTransmission();              // End the transmission
-
-    // Configure the acceleromter's sensitivity
-    Wire.beginTransmission(MPU_ADDRESS); // Start communication with MPU
-    Wire.write(0x1C);                    // Request the ACCEL_CONFIG register
-    Wire.write(0x10);                    // Apply the desired configuration to the register : ±8g
-    Wire.endTransmission();              // End the transmission
-
-    // Configure low pass filter
-    Wire.beginTransmission(MPU_ADDRESS); // Start communication with MPU
-    Wire.write(0x1A);                    // Request the CONFIG register
-    Wire.write(0x03);                    // Set Digital Low Pass Filter about ~43Hz
-    Wire.endTransmission();              // End the transmission
-}
-
 // A small helper for bluetooth error catching
 void error(const __FlashStringHelper*err) {
     Serial.println(err);
@@ -507,8 +337,6 @@ void BLEsetup(){
     }
     Serial.println( F("OK!") );
 
-    /* Perform a factory reset to make sure everything is in a known state */
-    Serial.println(F("Performing a factory reset: "));
     if (! ble.factoryReset() ){
          error(F("Couldn't factory reset"));
     }
@@ -533,8 +361,7 @@ void BLEsetup(){
 
     /* Disable command echo from Bluefruit */
     ble.echo(false);
-
-    Serial.println("Requesting Bluefruit info:");
+    
     /* Print Bluefruit information */
     ble.info();
 
@@ -602,7 +429,7 @@ void readController(){
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
           Kd[1] += 0.2;
           Kd[2] += 0.2;
-          ble.println("Kd: "+String(Kd[1]));
+          ble.println("Kp: "+String(Kd[1]));
          
         }
 
@@ -612,7 +439,7 @@ void readController(){
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
           Kd[1] -= 0.2;
           Kd[2] -= 0.2;
-          ble.println("Kd: "+String(Kd[1]));
+          ble.println("Kp: "+String(Kd[1]));
         }
 
         if(buttnum == 7){
@@ -649,8 +476,6 @@ void readController(){
  * Motors A & D run clockwise.
  * Motors B & C run counter-clockwise.
  *
- * Each motor output is considered as a servomotor. As a result, value range is about 1000µs to 2000µs
- *
  * @return void
  */
 void pidController() {
@@ -686,11 +511,11 @@ void pidController() {
       // NOTE: These depend on setup of drone. Verify setup is propper and
       //       consider changing the plus and minuses here if issues happen.
       //       If drone is in propper setup these make sense.
-      motor_lf_throttle = instruction[THROTTLE] + roll_pid + pitch_pid - yaw_pid + motor_lf_mod;
-      motor_rf_throttle = instruction[THROTTLE] - roll_pid + pitch_pid + yaw_pid + motor_rf_mod;
+      motor_lf_throttle = instruction[THROTTLE] + roll_pid + pitch_pid - yaw_pid;
+      motor_rf_throttle = instruction[THROTTLE] - roll_pid + pitch_pid + yaw_pid;
       // back motors are way more powerful
-      motor_lb_throttle = instruction[THROTTLE] + roll_pid - pitch_pid + yaw_pid + motor_lb_mod;
-      motor_rb_throttle = instruction[THROTTLE] - roll_pid - pitch_pid - yaw_pid + motor_rb_mod;
+      motor_lb_throttle = instruction[THROTTLE] + roll_pid - pitch_pid + yaw_pid;
+      motor_rb_throttle = instruction[THROTTLE] - roll_pid - pitch_pid - yaw_pid;
     }
     // Scale values to be within acceptable range for motors
     motor_lf_throttle = minMax(motor_lf_throttle, 0, 250);
