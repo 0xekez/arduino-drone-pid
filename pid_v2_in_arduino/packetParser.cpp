@@ -80,35 +80,14 @@ uint8_t readPacket(Adafruit_BLE *ble, uint16_t timeout)
 
   memset(packetbuffer, 0, READ_BUFSIZE);
 
-  while (timeout--) {
-    if (replyidx >= 20) break;
-    if ((packetbuffer[1] == 'A') && (replyidx == PACKET_ACC_LEN))
-      break;
-    if ((packetbuffer[1] == 'G') && (replyidx == PACKET_GYRO_LEN))
-      break;
-    if ((packetbuffer[1] == 'M') && (replyidx == PACKET_MAG_LEN))
-      break;
-    if ((packetbuffer[1] == 'Q') && (replyidx == PACKET_QUAT_LEN))
-      break;
-    if ((packetbuffer[1] == 'B') && (replyidx == PACKET_BUTTON_LEN))
-      break;
-    if ((packetbuffer[1] == 'C') && (replyidx == PACKET_COLOR_LEN))
-      break;
-    if ((packetbuffer[1] == 'L') && (replyidx == PACKET_LOCATION_LEN))
-      break;
-
-    while (ble->available()) {
-      char c =  ble->read();
-      if (c == '!') {
-        replyidx = 0;
-      }
-      packetbuffer[replyidx] = c;
-      replyidx++;
-      timeout = origtimeout;
+  // read from bluetooth
+  while(ble->available()) {
+    char c = ble->read();
+    if (c== '!'){
+      replyidx = 0;
     }
-    
-    if (timeout == 0) break;
-    delay(1);
+    packetbuffer[replyidx] = c;
+    replyidx++;
   }
 
   packetbuffer[replyidx] = 0;  // null term

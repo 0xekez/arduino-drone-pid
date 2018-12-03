@@ -34,7 +34,7 @@
 # define Y           1     // Y axis
 # define Z           2     // Z axis
 #define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
-#define FREQ        250   // Sampling frequency
+#define FREQ        200   // Sampling frequency
 #define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
 
 // Status of Drone
@@ -110,8 +110,6 @@ long acc_total_vector;
 float measures[3] = {0,0,0};
 // The MPU temperature
 int mpu_temp;
-// Flag to signify if system in initialized
-bool initialized = false;
 // Flag to signify if the system is started
 bool started = false;
 
@@ -148,9 +146,9 @@ float previous_error[3] = {0,0,0};
 //float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
-float Kp[3]        = {0.5, 1.1, 1.3};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.001, 0.002, 0.003}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 6.95, 7.15};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kp[3]        = {0, 1.4, 1.4};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 23.25, 23.25};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -164,8 +162,8 @@ int status = STOPPED;
 // ---------------------------------------------------------------------------
 
 // for calculating running frequency of code
-//float i {0};
-//float start_seconds {0};
+float i {0};
+float start_seconds {0};
 
 // Function Prototypes
 void pidController();
@@ -190,13 +188,15 @@ void setup() {
 
   // Turn off MPU once setup is complete
   digitalWrite(13, LOW);
-  //start_seconds = millis()/1000;
+  start_seconds = millis()/1000;
+  //initialize the gyro angles with the accel
+  resetGyroAngles();
 }
 
 void loop() {
   // code for calculating the running frequency of the program = 150 hz
-//  i++;
-//  Serial.println(i/(millis()/1000-start_seconds));
+  i++;
+  Serial.println(i/(millis()/1000-start_seconds));
   // 1. Read raw values from MPU6050
   readSensor();
 
@@ -254,15 +254,9 @@ void calculateAngles()
     calculateGyroAngles();
     calculateAccelerometerAngles();
 
-    if (initialized) {
-        // Correct the drift of the gyro with the accelerometer
-        gyro_angle[X] = gyro_angle[X] * 0.99 + acc_angle[X] * 0.01;
-        gyro_angle[Y] = gyro_angle[Y] * 0.99 + acc_angle[Y] * 0.01;
-    } else {
-        // At very first start, init gyro angles with accelerometer angles
-        resetGyroAngles();
-        initialized = true;
-    }
+    // Correct the drift of the gyro with the accelerometer
+    gyro_angle[X] = gyro_angle[X] * 0.99 + acc_angle[X] * 0.01;
+    gyro_angle[Y] = gyro_angle[Y] * 0.99 + acc_angle[Y] * 0.01;
 
     // To dampen the pitch and roll angles a complementary filter is used
     measures[ROLL]  = measures[ROLL]  * 0.9 + gyro_angle[X] * 0.1;
@@ -445,12 +439,15 @@ void BLEsetup(){
 void readController(){
     // read new packet data
     uint8_t len = readPacket(&ble, BLE_READPACKET_TIMEOUT);
-    // Buttons
-    if (packetbuffer[1] == 'B') {
-      uint8_t buttnum = packetbuffer[2] - '0';
-      boolean pressed = packetbuffer[3] - '0';
+   
+    if (len == 0) return;
+    // otherwise, we got a packet
 
-      if (pressed) {
+    if (packetbuffer[1] == 'B') {
+      // if its pressed, previous git versions will have a var assignment here
+      // took it out in the hope that it will get a little quicker, but I'm dubious
+      if (packetbuffer[3] - '0') {
+        uint8_t buttnum = packetbuffer[2] - '0';
         if(buttnum == 1){
           // Increase throttle
           ble.println(instruction[THROTTLE]);
@@ -475,20 +472,22 @@ void readController(){
         }
 
         if(buttnum == 5){
-          ble.println("Forward");
-          instruction[YAW] -= 1;
-          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-//          Kp[1] += 0.1;
-//          ble.println("Kp roll: "+String(Kp[1]));
+//          ble.println("Forward");
+//          instruction[YAW] -= 1;
+//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+          Kp[1] += 0.2;
+          Kp[2] += 0.2;
+          ble.println("Kp: "+String(Kp[1]));
          
         }
 
         if(buttnum == 6){
-          ble.println("Backward");
-          instruction[YAW] += 1;
-          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-//          Kp[1] -= 0.1;
-//          ble.println("Kp roll: "+String(Kp[1]));
+//          ble.println("Backward");
+//          instruction[YAW] += 1;
+//          instruction[YAW] = minMax(instruction[YAW], -180, 180);
+          Kp[1] -= 0.2;
+          Kp[2] -= 0.2;
+          ble.println("Kp: "+String(Kp[1]));
         }
 
         if(buttnum == 7){
