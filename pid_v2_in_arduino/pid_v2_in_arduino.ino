@@ -18,11 +18,14 @@
 #include <Adafruit_BLE.h>
 #include <Adafruit_BluefruitLE_SPI.h>
 #include "BluefruitConfig.h"
+#include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
 
 // ---------------- Constants ---------------------------------------
 # define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
 # define FREQ        130   // Sampling frequency
 # define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
+#define INTERRUPT_PIN 2
 
 // Index locations for data and instructions
 # define YAW         0
@@ -84,7 +87,7 @@ unsigned long lastPress = 0;
 // Raw values from gyro (deg/sec) in order: [x, y, z]
 int gyro_raw[3] = {0,0,0};
 // Average gyro offsets on each axis in order: [x, y, z]
-long gyro_offset[3] = {113,45,33};
+long gyro_offsets[3] = {113,45,33};
 // Calculated angles from gyro in order: [x, y, z]
 float gyro_angle[3] = {0,0,0};
 
@@ -97,7 +100,24 @@ float acc_angle[3] = {0,0,0};
 
 // total 3D acceleration vector (m/sec^2)
 long acc_total_vector;
+MPU6050 mpu;
 
+// MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+
+// orientation/motion vars
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorFloat gravity;    // [x, y, z]            gravity vector
 /*
  * Real YPR measurements calculated from combination of accelerometer and gyro
  * data in order: [yaw, pitch, roll]
@@ -146,9 +166,10 @@ float previous_error[3] = {0,0,0};
 //float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
+//float Kp[3]        = {0, 0, 0};
 float Kp[3]        = {0, 1.4, 1.4};    // P coefficients in that order : Yaw, Pitch, Roll
 float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 23.25, 23.25};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 70, 70};        // D coefficients in that order : Yaw, Pitch, Roll
 
 // ---------------------------------------------------------------------------
 /**
@@ -162,8 +183,8 @@ int status = STOPPED;
 // ---------------------------------------------------------------------------
 
 // for calculating running frequency of code
-float i {0};
-float start_seconds {0};
+//float i {0};
+//float start_seconds {0};
 
 // Function Prototypes
 void pidController();
@@ -182,21 +203,26 @@ void setup() {
   pinMode(13, OUTPUT);
   digitalWrite(13, HIGH);
 
-  setupMpu6050Registers();
+//  setupMpu6050Registers();
 
   BLEsetup();
 
   // Turn off MPU once setup is complete
   digitalWrite(13, LOW);
-  start_seconds = millis()/1000;
+//  start_seconds = millis()/1000;
   //initialize the gyro angles with the accel
   resetGyroAngles();
 }
 
 void loop() {
+  // mpu setup failed
+  if (!dmpReady) {
+    ble.print("MPU error");
+    return;
+  }
   // code for calculating the running frequency of the program = 150 hz
-  i++;
-  Serial.println(i/(millis()/1000-start_seconds));
+//  i++;
+//  Serial.println(i/(millis()/1000-start_seconds));
   // 1. Read raw values from MPU6050
   readSensor();
 
@@ -221,6 +247,105 @@ void loop() {
   }
 
 }
+
+void setupMPUv2(){
+    // join I2C bus (I2Cdev library doesn't do this automatically)
+  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+      Wire.begin();
+      Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
+  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+      Fastwire::setup(400, true);
+  #endif
+  mpu.initialize();
+  // load and configure dmp
+  devStatus = mpu.dmpInitialize();
+
+  //calibrate gyro offsets
+  mpu.setXGyroOffset(gyro_offsets[0]);
+  mpu.setYGyroOffset(gyro_offsets[1]);
+  mpu.setZGyroOffset(gyro_offsets[2]);
+  mpu.setZAccelOffset(gyro_offsets[2]);
+
+  // make sure it worked
+  if (devStatus == 0){
+    // turn on the DMP, now that it's ready
+    Serial.println(F("Enabling DMP..."));
+    mpu.setDMPEnabled(true);
+
+    // enable Arduino interrupt detection
+    Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
+    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
+    Serial.println(F(")..."));
+    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
+    mpuIntStatus = mpu.getIntStatus();
+
+    // set our DMP Ready flag so the main loop() function knows it's okay to use it
+    Serial.println(F("DMP ready! Waiting for first interrupt..."));
+    dmpReady = true;
+
+    // get expected DMP packet size for later comparison
+    packetSize = mpu.dmpGetFIFOPacketSize();
+  } else {
+    // ERROR!
+    // 1 = initial memory load failed
+    // 2 = DMP configuration updates failed
+    // (if it's going to break, usually the code will be 1)
+    Serial.print(F("DMP Initialization failed (code "));
+    Serial.print(devStatus);
+    Serial.println(F(")"));
+  }
+}
+
+void calculateAnglesv2(){
+  // wait for MPU interrupt or extra packet(s) available
+  while (!mpuInterrupt && fifoCount < packetSize) {
+      if (mpuInterrupt && fifoCount < packetSize) {
+        // try to get out of the infinite loop 
+        fifoCount = mpu.getFIFOCount();
+      }  
+      // other program behavior stuff here
+      // .
+      // .
+      // .
+      // if you are really paranoid you can frequently test in between other
+      // stuff to see if mpuInterrupt is true, and if so, "break;" from the
+      // while() loop to immediately process the MPU data
+      // .
+      // .
+      // .
+  }
+
+  // reset interrupt flag and get INT_STATUS byte
+  mpuInterrupt = false;
+  mpuIntStatus = mpu.getIntStatus();
+
+  // get current FIFO count
+  fifoCount = mpu.getFIFOCount();
+
+  // check for overflow (this should never happen unless our code is too inefficient)
+  if ((mpuIntStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || fifoCount >= 1024) {
+      // reset so we can continue cleanly
+      mpu.resetFIFO();
+      fifoCount = mpu.getFIFOCount();
+      Serial.println(F("FIFO overflow!"));
+
+  // otherwise, check for DMP data ready interrupt (this should happen frequently)
+  } else if (mpuIntStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT)) {
+      // wait for correct available data length, should be a VERY short wait
+      while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+
+      // read a packet from FIFO
+      mpu.getFIFOBytes(fifoBuffer, packetSize);
+      
+      // track FIFO count here in case there is > 1 packet available
+      // (this lets us immediately read more without waiting for an interrupt)
+      fifoCount -= packetSize;
+      mpu.dmpGetQuaternion(&q, fifoBuffer);
+      mpu.dmpGetGravity(&gravity, &q);
+      mpu.dmpGetYawPitchRoll(measures, &q, &gravity);
+}
+}
+
 
 /**
  * Request raw values from MPU6050.
@@ -275,9 +400,9 @@ void calculateAngles()
 void calculateGyroAngles()
 {
     // Subtract offsets
-    gyro_raw[X] -= gyro_offset[X];
-    gyro_raw[Y] -= gyro_offset[Y];
-    gyro_raw[Z] -= gyro_offset[Z];
+    gyro_raw[X] -= gyro_offsets[X];
+    gyro_raw[Y] -= gyro_offsets[Y];
+    gyro_raw[Z] -= gyro_offsets[Z];
 
     // Angle calculation using integration
     gyro_angle[X] += (gyro_raw[X] / (FREQ * SSF_GYRO));
@@ -475,9 +600,9 @@ void readController(){
 //          ble.println("Forward");
 //          instruction[YAW] -= 1;
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kp[1] += 0.2;
-          Kp[2] += 0.2;
-          ble.println("Kp: "+String(Kp[1]));
+          Kd[1] += 0.2;
+          Kd[2] += 0.2;
+          ble.println("Kd: "+String(Kd[1]));
          
         }
 
@@ -485,9 +610,9 @@ void readController(){
 //          ble.println("Backward");
 //          instruction[YAW] += 1;
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kp[1] -= 0.2;
-          Kp[2] -= 0.2;
-          ble.println("Kp: "+String(Kp[1]));
+          Kd[1] -= 0.2;
+          Kd[2] -= 0.2;
+          ble.println("Kd: "+String(Kd[1]));
         }
 
         if(buttnum == 7){
