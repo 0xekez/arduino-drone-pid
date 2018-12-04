@@ -138,10 +138,10 @@ float previous_error[3] = {0,0,0};
 //float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
-float Kp[3]        = {0, 0, 0};
-//float Kp[3]        = {0, 0.7, 0.7};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {0, 28, 28};        // D coefficients in that order : Yaw, Pitch, Roll
+//float Kp[3]        = {0, 0, 0};
+float Kp[3]        = {0, 0.7, 0.8};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.00, 0.05, 0.05}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {20, 45, 60};        // D coefficients in that order : Yaw, Pitch, Roll
 
 //float Kp[3]        = {8.5, 4, 4};    // P coefficients in that order : Yaw, Pitch, Roll
 //float Ki[3]        = {0.00, 0.0, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
@@ -295,11 +295,11 @@ void calculateAnglesv2(){
       measures[YAW] = measures[YAW]*180/M_PI;
       measures[PITCH] = measures[PITCH]*180/M_PI;
       measures[ROLL] = measures[ROLL]*180/M_PI;
-      Serial.print(measures[YAW]);
-      Serial.print("\t");
-      Serial.print(measures[PITCH]);
-      Serial.print("\t");
-      Serial.println(measures[ROLL]);
+//      Serial.print(measures[YAW]);
+//      Serial.print("\t");
+//      Serial.print(measures[PITCH]);
+//      Serial.print("\t");
+//      Serial.println(measures[ROLL]);
 }
 }
 
@@ -427,9 +427,9 @@ void readController(){
 //          ble.println("Forward");
 //          instruction[YAW] -= 1;
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kd[1] += 0.2;
-          Kd[2] += 0.2;
-          ble.println("Kp: "+String(Kd[1]));
+          Kp[1] += 0.5;
+          Kp[2] += 0.5;
+          ble.println("Kp: "+String(Kp[1]));
          
         }
 
@@ -437,9 +437,9 @@ void readController(){
 //          ble.println("Backward");
 //          instruction[YAW] += 1;
 //          instruction[YAW] = minMax(instruction[YAW], -180, 180);
-          Kd[1] -= 0.2;
-          Kd[2] -= 0.2;
-          ble.println("Kp: "+String(Kd[1]));
+          Kp[1] -= 0.5;
+          Kp[2] -= 0.5;
+          ble.println("Kp: "+String(Kp[1]));
         }
 
         if(buttnum == 7){
