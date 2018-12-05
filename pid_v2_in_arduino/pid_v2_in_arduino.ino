@@ -34,8 +34,6 @@
 # define Y           1     // Y axis
 # define Z           2     // Z axis
 #define MPU_ADDRESS 0x68  // I2C address of the MPU-6050
-#define FREQ        170   // Sampling frequency
-#define SSF_GYRO    65.5  // Sensitivity Scale Factor of the gyro from datasheet
 
 // Status of Drone
 # define STOPPED     0
@@ -77,10 +75,10 @@ unsigned long lastPress = 0;
  * Offset values are calculated with the IMU_zero exaple sketch
  */
 // Average gyro offsets on each axis in order: [x, y, z]
-long gyro_offsets[3] = {113,45,33};
+long gyro_offsets[3] = {130,44,35};
 
 //acc offsets in order: [x,y,z]
-long acc_offsets[3] = {-3061,-617,607};
+long acc_offsets[3] = {-3000,-581,649};
 
 MPU6050 mpu;
 
@@ -117,8 +115,8 @@ bool started = false;
 // Pins MOSFET sources are attached to on Arduino for each motor
 int motor_lf {11},
     motor_lb {10},
-    motor_rf {6},
-    motor_rb {9};
+    motor_rf {9},
+    motor_rb {6};
 
 // Throttle values for each motor
 int motor_lf_throttle {0},
@@ -139,9 +137,12 @@ float previous_error[3] = {0,0,0};
 //float Kd[3]        = {0,6.8,7.3};//{1.8, 1.5, 0};        // D coefficients in that order : Yaw, Pitch, Roll
 
 //float Kp[3]        = {0, 0, 0};
-float Kp[3]        = {0, 0.7, 0.8};    // P coefficients in that order : Yaw, Pitch, Roll
-float Ki[3]        = {0.00, 0.05, 0.05}; // I coefficients in that order : Yaw, Pitch, Roll
-float Kd[3]        = {20, 45, 60};        // D coefficients in that order : Yaw, Pitch, Roll
+//float Kp[3]        = {0, .21, .21};    // P coefficients in that order : Yaw, Pitch, Roll
+//float Ki[3]        = {0.00, 0.01, 0.01}; // I coefficients in that order : Yaw, Pitch, Roll
+//float Kd[3]        = {0, 10, 10};        // D coefficients in that order : Yaw, Pitch, Roll
+float Kp[3]        = {0, 0.9, 0.9};    // P coefficients in that order : Yaw, Pitch, Roll
+float Ki[3]        = {0.00, 0.00, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
+float Kd[3]        = {0, 13, 13};        // D coefficients in that order : Yaw, Pitch, Roll
 
 //float Kp[3]        = {8.5, 4, 4};    // P coefficients in that order : Yaw, Pitch, Roll
 //float Ki[3]        = {0.00, 0.0, 0.00}; // I coefficients in that order : Yaw, Pitch, Roll
@@ -160,7 +161,7 @@ int status = STOPPED;
 
 // for calculating running frequency of code
 float i {0};
-//float start_seconds {0};
+float start_seconds {0};
 
 void setup() {
   stopMotors();
@@ -176,7 +177,7 @@ void setup() {
 
   // Turn off MPU once setup is complete
   digitalWrite(13, LOW);
-//  start_seconds = millis()/1000;
+  start_seconds = millis()/1000;
 }
 
 void loop() {
@@ -186,8 +187,8 @@ void loop() {
     return;
   }
   // code for calculating the running frequency of the program
-//  i++;
-//  Serial.println(i/(millis()/1000-start_seconds));
+  i++;
+  Serial.println(i/(millis()/1000-start_seconds));
 
   // 3. Read input from bluetooth controller
   readController();
@@ -505,7 +506,6 @@ void pidController() {
       yaw_pid   = (errors[YAW]   * Kp[YAW])   + (error_sum[YAW]   * Ki[YAW])   + (delta_err[YAW]   * Kd[YAW]);
       pitch_pid = (errors[PITCH] * Kp[PITCH]) + (error_sum[PITCH] * Ki[PITCH]) + (delta_err[PITCH] * Kd[PITCH]);
       roll_pid  = (errors[ROLL]  * Kp[ROLL])  + (error_sum[ROLL]  * Ki[ROLL])  + (delta_err[ROLL]  * Kd[ROLL]);
-      //Serial.println(yaw_pid);
 
       // Cauculate new target throttle for each motor
       // NOTE: These depend on setup of drone. Verify setup is propper and
@@ -518,10 +518,10 @@ void pidController() {
       motor_rb_throttle = instruction[THROTTLE] - roll_pid - pitch_pid - yaw_pid;
     }
     // Scale values to be within acceptable range for motors
-    motor_lf_throttle = minMax(motor_lf_throttle, 0, 250);
-    motor_rf_throttle = minMax(motor_rf_throttle, 0, 250);
-    motor_lb_throttle = minMax(motor_lb_throttle, 0, 250);
-    motor_rb_throttle = minMax(motor_rb_throttle, 0, 250);
+    motor_lf_throttle = minMax(motor_lf_throttle, 0, 255);
+    motor_rf_throttle = minMax(motor_rf_throttle, 0, 255);
+    motor_lb_throttle = minMax(motor_lb_throttle, 0, 255);
+    motor_rb_throttle = minMax(motor_rb_throttle, 0, 255);
 }
 
 /**
